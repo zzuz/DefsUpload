@@ -2,30 +2,28 @@
 # -*- coding:utf-8 -*-
 
 """
-Скрипт для сбора данных с http://www.rossvyaz.ru/docs/articles/ . 
+Скрипт для сбора данных с https://opendata.digital.gov.ru/downloads . 
 Работает на системах с Freepbx .
 Скрипт собирает данные по каждому указанному DEF и кладет в таблицу.
 Наличие переменной MERGE_TABLE указывает на сбор данных в одну таблицу.
 Перед сбором каждая таблица удаляется и создается заново.
 """
 
-import urllib2,re,sys
+import urllib2,csv,sys,ssl,re
 
 
-DEFAULT_RE=r'<tr>\t<td>\t(?P<def>\d{3})\t</td>\t?<td>\t(?P<start>\d{7})\t</td>\t?<td>\t(?P<end>\d{7})\t</td>\t?<td>\t(?P<capacity>\d{,9})\t</td>\t?<td>\t(?P<operator>.*)\t</td>\t?<td>\t(?P<region>.*)\t</td>\t</tr>'
-DEFAULT_DB='defs'
-MERGE_TABLE='allx'
+DEFAULT_DB='defs_test'
+MERGE_TABLE='defs'
 DEFAULT_URLS={
-  '3x':'http://www.rossvyaz.ru/docs/articles/ABC-3x.html',
-  '9x':'http://www.rossvyaz.ru/docs/articles/DEF-9x.html',
-  '4x':'http://www.rossvyaz.ru/docs/articles/ABC-4x.html',
-  '8x':'http://www.rossvyaz.ru/docs/articles/ABC-8x.html'}
+  '3x':'https://opendata.digital.gov.ru/downloads/ABC-3xx.csv',
+  '9x':'https://opendata.digital.gov.ru/downloads/DEF-9xx.csv',
+  '4x':'https://opendata.digital.gov.ru/downloads/ABC-4xx.csv',
+  '8x':'https://opendata.digital.gov.ru/downloads/ABC-8xx.csv'}
 
 
 class DEFUploader(object):
-  def __init__(self,urls=DEFAULT_URLS,defs_re=DEFAULT_RE):
+  def __init__(self,urls=DEFAULT_URLS):
     self.urls=urls
-    self.def_re=defs_re
     self.count=0
           
   def __del__(self):
@@ -36,6 +34,7 @@ class DEFUploader(object):
     
   def urlopener(self):
     try:
+      ssl._create_default_https_context = ssl._create_unverified_context
       self.html_page_obj=urllib2.urlopen(self.url)
       return self.html_page_obj
     except urllib2.URLError:
@@ -43,21 +42,18 @@ class DEFUploader(object):
 
     
   def getdefs(self):
-    DF_RE=re.compile(self.def_re)
-    if not hasattr(self,'htmlpage'):
-      self.htmlpage=self.urlopener()
-    for i in self.htmlpage:
-      i=unicode(i,'cp1251')
-      m=DF_RE.match(i)
-      if m:
-          yield (m.group('def'),m.group('start'), m.group('end'),m.group('operator'),m.group('region'))
+    if not hasattr(self,'csvpage'):
+      self.csvpage=self.urlopener()
+    for i in csv.DictReader(self.csvpage, delimiter=';',quotechar='"'):
+      """ первая колонка плохо воспринимается на некоторых системах  <АВС/ DEF>"""
+      yield (i['\xef\xbb\xbf\xd0\x90\xd0\x92\xd0\xa1/ DEF'],i['От'], i['До'],i['Оператор'],i['Регион'])
           
   def defs_upload(self,cur,table):
     self.url=DEFAULT_URLS[table]
     self.table=table
     self.cur=cur
-    if not hasattr(self,'htmlpage'):
-      self.htmlpage=self.urlopener()
+    if not hasattr(self,'csvpage'):
+      self.csvpage=self.urlopener()
     #self.cur.query("""INSERT IGNORE INTO %s_old SELECT * FROM %s""" % (self.table,self.table))
     self.create_table()
     print "Заносим данные в таблицу %s" % self.table
@@ -67,7 +63,7 @@ class DEFUploader(object):
       c+=1
     print "Занесено %d значений для таблицы %s" % (c,self.table)
     self.count+=c
-    delattr(self,'htmlpage')
+    delattr(self,'csvpage')
   
   def create_table(self,table=None):
     if table is None:
@@ -80,7 +76,7 @@ class DEFUploader(object):
       `end` INT( 7 ) NOT NULL COMMENT  'До',
       `operator` TEXT NOT NULL COMMENT  'Оператор',
       `region` TEXT NOT NULL COMMENT  'Регион'
-      ) ENGINE = MYISAM CHARACTER SET utf8 COLLATE utf8_unicode_ci COMMENT =  'Коды операторов'""" % {'TABLE':table} )
+      ) ENGINE = MYISAM CHARACTER SET utf8 COLLATE utf8_general_ci COMMENT =  'Коды операторов'""" % {'TABLE':table} )
   
   def del_table(self,table=None):
     if table is None:
